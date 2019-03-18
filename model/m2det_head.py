@@ -21,13 +21,80 @@ from .weight_init import xavier_init
 from .losses import weighted_smoothl1
 
 class M2detHead(nn.Module):
-    
+    """M2detHead主要完成3件事：生成anchors, 处理feat maps，计算loss
+    """
     def __init__(self,
-                 input_size = 512,
-                 step_pattern = [8, 16, 32, 64, 128, 256],
-                 size_pattern = [0.06, 0.15, 0.33, 0.51, 0.69, 0.87, 1.05],
-                 ):
-
+                 input_size = 512,      # 相同保留
+                 in_channels = [64, 32, 16, 8, 4, 2],
+                 num_classes = 81,
+                 step_pattern = [8, 16, 32, 64, 128, 256],  # 代表特征图的缩放比例，也就是每个特征图上cell对应的原图大小，也就是原图所要布置anchor的尺寸空间(可以此计算ctx,cty)
+                 size_pattern = [0.06, 0.15, 0.33, 0.51, 0.69, 0.87, 1.05],  # 代表anchors尺寸跟img的比例, 前6个数是min_size比例，后6个数是max_size比例，可以此计算anchor最小最大尺寸
+                 size_featmaps = [64, 32, 16, 8, 4, 2],
+                 anchor_ratio_range = ([2, 3], [2, 3], [2, 3], [2, 3], [2, 3], [2, 3]),
+                 target_means=(.0, .0, .0, .0),
+                 target_stds=(1.0, 1.0, 1.0, 1.0),
+                 **kwargs):  # 这里的2代表了2和1/2, 而3代表了3和1/3，可以此计算每个cell的anchor个数：2个方框+4个ratio=6个
+        
+        # create m2det head layers
+        reg_convs = []
+        cls_convs = []
+        for i in range(len(in_channels)):
+            reg_convs.append(
+                nn.Conv2d(
+                    in_channels[i],
+                    4 * 6,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1))
+            cls_convs.append(
+                nn.Conv2d(
+                    in_channels[i],
+                    num_classes * 6,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1))
+        self.reg_convs = nn.ModuleList(reg_convs)
+        self.cls_convs = nn.ModuleList(cls_convs)
+        
+        # generate anchors
+        if input_size == 512:
+            min_ratios = size_pattern[:-1]
+            max_ratios = size_pattern[1:]
+            
+            min_sizes = min_ratios * input_size
+            max_sizes = max_ratios * input_size
+            
+            anchor_ratios = anchor_ratio_range
+            anchor_strides = step_pattern
+            
+        for k in range(len(anchor_strides)):
+            base_size = min_sizes[k]
+            stride = anchor_strides[k]
+            ctr = ((stride - 1) / 2., (stride - 1) / 2.)
+            scales = [1., np.sqrt(max_sizes[k] / min_sizes[k])]  # 以base_size为第一个anchor，即scale=1，再以
+            ratios = [1.]
+            for r in anchor_ratios[k]:
+                ratios += [1 / r, r]  # m2det里边似乎选择了每个位置都是6个anchors
+            anchor_generator = AnchorGenerator(
+                base_size, scales, ratios, scale_major=False, ctr=ctr)
+            
+            # for m2det, there are 6 anchors for each cells, no matter in any featmap cell
+            # no need to delete some of the anchors in base_anchors
+            
+#            indices = list(range(len(ratios)))
+#            indices.insert(1, len(indices))
+#            anchor_generator.base_anchors = torch.index_select(
+#                anchor_generator.base_anchors, 0, torch.LongTensor(indices))
+            self.anchor_generators.append(anchor_generator)
+    
+    def get_anchors(self):
+        pass
+                
+    def loss_single(self):
+        pass
+    
+    def loss(self):
+        pass        
 
 class SSDHead(nn.Module):
 
@@ -91,6 +158,7 @@ class SSDHead(nn.Module):
                 max_sizes.insert(0, int(input_size * 15 / 100))
         self.anchor_generators = []
         self.anchor_strides = anchor_strides
+        
         for k in range(len(anchor_strides)):
             base_size = min_sizes[k]
             stride = anchor_strides[k]
