@@ -17,11 +17,15 @@ from utils.anchor_generator import AnchorGenerator
 from utils.anchor_target import anchor_target
 from utils.multi_apply import multi_apply  
 from utils.bbox_reg import delta2bbox
-from .weight_init import xavier_init  
+from .weight_init import kaiming_normal_init
 from .losses import weighted_smoothl1
 
 class M2detHead(nn.Module):
     """M2detHead主要完成3件事：生成anchors, 处理feat maps，计算loss
+    1. anchors的生成：输入anchor跟原图的尺寸比例
+       先基于anchor的尺寸比例乘以img尺寸得到min_size, max_size，然后基于strides
+       计算anchor在cell的中心点坐标ctx,cty, 然后定义scales=[1,sqrt(max_size/min_size)]
+       以及定义ratio=[1,2,1/2,3,1/3], 取scale=1的5种ratio，然后区scale=sqrt(max_size/min_size)的1种ratio=1
     """
     def __init__(self,
                  input_size = 512,      # 相同保留
@@ -75,17 +79,46 @@ class M2detHead(nn.Module):
             ratios = [1.]
             for r in anchor_ratios[k]:
                 ratios += [1 / r, r]  # m2det里边似乎选择了每个位置都是6个anchors
+            # scales (2,) and ratios (5,), if scale_major=False, (1,5)*(2,1)->(2,5)*(2,5)->(2,5)
             anchor_generator = AnchorGenerator(
                 base_size, scales, ratios, scale_major=False, ctr=ctr)
             
             # for m2det, there are 6 anchors for each cells, no matter in any featmap cell
-            # no need to delete some of the anchors in base_anchors
-            
+          
 #            indices = list(range(len(ratios)))
 #            indices.insert(1, len(indices))
 #            anchor_generator.base_anchors = torch.index_select(
 #                anchor_generator.base_anchors, 0, torch.LongTensor(indices))
             self.anchor_generators.append(anchor_generator)
+    
+    def init_weights(self):
+        
+        def weights_init(m):
+            for key in m.state_dict():
+                if key.split('.')[-1] == 'weight':
+                    if 'conv' in key:
+                        kaiming_normal_init(m.state_dict()[key], mode='fan_out')
+                    if 'bn' in key:
+                        m.state_dict()[key][...] = 1
+                elif key.split('.')[-1] == 'bias':
+                    m.state_dict()[key][...] = 0   
+        
+        self.cls_convs.apply(weights_init)
+        self.reg_convs.apply(weights_init)
+    
+    def forward(self, feats):
+        """input from MLFPN
+        Args:
+            feats(tensor): n levels tums outs concated samed scale out. 
+            [(2048,64,64),(2048,32,32),(2048,16,16),(2048,8,8),(2048,4,4),(2048,2,2)]
+        
+        """
+        bbox_preds = []
+        cls_scores = []
+        for (feat, reg_conv, cls_conv) in zip(feats, self.reg_convs, self.cls_convs):
+            bbox_preds.append(reg_conv(feat))
+            cls_scores.append(cls_conv(feat))
+        return bbox_preds, cls_scores
     
     def get_anchors(self):
         pass

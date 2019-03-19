@@ -1,3 +1,5 @@
+
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -5,8 +7,10 @@ Created on Thu Mar 14 15:00:07 2019
 
 @author: ubuntu
 """
+import torch
 import torch.nn as nn
-
+import torch.nn.functional as F
+from .weight_init import kaiming_normal_init
 
 class BasicConv(nn.Module):
 
@@ -104,9 +108,33 @@ class TUM(nn.Module):
 
 
 class SFAM(nn.Module):
-    
-    def __init__(self):
-        pass
+    def __init__(self, planes, num_levels, num_scales, compress_ratio=16):
+        super(SFAM, self).__init__()
+        self.planes = planes
+        self.num_levels = num_levels
+        self.num_scales = num_scales
+        self.compress_ratio = compress_ratio
+
+        self.fc1 = nn.ModuleList([nn.Conv2d(self.planes*self.num_levels,
+                                                 self.planes*self.num_levels // 16,
+                                                 1, 1, 0)] * self.num_scales)
+        self.relu = nn.ReLU(inplace=True)
+        self.fc2 = nn.ModuleList([nn.Conv2d(self.planes*self.num_levels // 16,
+                                                 self.planes*self.num_levels,
+                                                 1, 1, 0)] * self.num_scales)
+        self.sigmoid = nn.Sigmoid()
+        self.avgpool = nn.AdaptiveAvgPool2d(1)
+
+    def forward(self, x):
+        attention_feat = []
+        for i, _mf in enumerate(x):
+            _tmp_f = self.avgpool(_mf)
+            _tmp_f = self.fc1[i](_tmp_f)
+            _tmp_f = self.relu(_tmp_f)
+            _tmp_f = self.fc2[i](_tmp_f)
+            _tmp_f = self.sigmoid(_tmp_f)
+            attention_feat.append(_mf*_tmp_f)
+        return attention_feat
 
 
 
@@ -114,19 +142,31 @@ class MLFPN(nn.Module):
     """创建Multi Layers Feature Pyramid Net
     1. TUM: 类似与unet/fpn的多级特征融合模块
     """
-    def __init__(self, phase, size, planes, smooth=True, num_scales=6, side_channel=512):
+    def __init__(self, 
+                 backbone_type,
+                 phase, 
+                 size, 
+                 planes, 
+                 smooth=True, 
+                 num_levels=8, 
+                 num_scales=6, 
+                 side_channel=512,
+                 sfam = False,
+                 compress_ratio=16):
         super().__init__()
-        self.phase = phase
-        self.size = size
+        self.phase = phase  # train or test
+        self.size = size    # 
         self.planes = planes
         self.smooth = smooth
+        self.num_levels = num_levels
         self.num_scales = num_scales
         self.side_channel = side_channel
+        self.compress_ratio = compress_ratio
         
         # build FFM
         # TODO: need parameter backbone type
         if backbone_type == 'SSDVGG':
-            shollow_in, shallow_out = 512, 256  # for vgg shallow layer output
+            shallow_in, shallow_out = 512, 256  # for vgg shallow layer output
             deep_in, deep_out = 1024, 512       # for vgg deep layer output
         self.reduce= BasicConv(
             shallow_in, shallow_out, kernel_size=3, stride=1, padding=1)
@@ -155,14 +195,34 @@ class MLFPN(nn.Module):
                             is_smooth=self.smooth,
                             scales=self.num_scales,
                             side_channel=self.side_channel))
-        
         # build sfam:
         if self.sfam:
-            self.sfam_module = SFAM(self.planes, self.num_levels, self.num_scales, compress_ratio=16)
+            self.sfam_module = SFAM(self.planes, 
+                                    self.num_levels, 
+                                    self.num_scales, 
+                                    compress_ratio=self.compress_ratio)
+        # build norm
+        self.Norm = nn.BatchNorm2d(256*self.num_levels)
 
+    def init_weights(self):
+        def weights_init(m):
+            for key in m.state_dict():
+                if key.split('.')[-1] == 'weight':
+                    if 'conv' in key:
+                        kaiming_normal_init(m.state_dict()[key], mode='fan_out')
+                    if 'bn' in key:
+                        m.state_dict()[key][...] = 1
+                elif key.split('.')[-1] == 'bias':
+                    m.state_dict()[key][...] = 0   
+        
+        for i in range(self.num_levels):
+            self.tums[i].apply(weights_init)
+        self.reduce.apply(weights_init)
+        self.up_reduce.apply(weights_init)
+        self.leach.apply(weights_init)
         
     def forward(self, x):
-        """
+        """Returns the Multi layer output with same scales concated together. [2048] 
         Args:
             x(list): feature list from vgg16, (512, 64, 64), (1024 , 32, 32)
         """
@@ -170,9 +230,25 @@ class MLFPN(nn.Module):
         x_deep = self.up_reduce(x)
         base_feature = torch.cat(x_shallow, 
             F.interpolate(x_deep, scale_factor=2, mode='nearest'), 1)
-        tum_outs = 
         
-
+        tum_outs = [self.tums[0](self.leach[0](base_feature), 'none')]
+        for i in range(1, self.num_levels, 1):
+            tum_outs.append(self.tums[i](self.leach[i](base_feature), tum_outs[i-1][-1]))
+        
+        # concate same scale outputs together, [(2048,64,64),(2048,32,32),(2048,16,16),(2048,8,8),(2048,4,4),(2048,2,2)]
+        sources = []
+        for i in range(self.num_scales, 0, -1):
+            sources.append(torch.cat([tum_out[i] for tum_out in tum_outs], 1))
+        
+        if self.sfam:
+            sources = self.sfam_module(sources)
+        
+        sources[0] = self.Norm(sources[0])
+        
+        return sources
+    
+        
+"""        
 class FPN(nn.Module):
 
     def __init__(self,
@@ -293,3 +369,4 @@ class FPN(nn.Module):
                     # BUG: we should add relu before each extra conv
                     outs.append(self.fpn_convs[i](outs[-1]))
         return tuple(outs)
+"""
