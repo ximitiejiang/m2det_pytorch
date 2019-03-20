@@ -14,7 +14,7 @@ if __name__ == '__main__':
     cfg_fpn = dict(backbone_type = 'SSDVGG',
                    phase = 'train',
                    size = 512,
-                   planes = 
+                   planes = 256,  
                    smooth = True,
                    num_levels = 8,
                    num_scales = 6,
@@ -24,9 +24,11 @@ if __name__ == '__main__':
     mlfpn = MLFPN(**cfg_fpn)
     mlfpn.init_weights()
 
-    feat_shallow = torch.randn(2,512,64,64)
-    feat_deep = torch.randn(2,1024,32,32)
-    feats = [feat_shallow, feat_deep]
-    mlfpn(feats)
+    feat_shallow = [torch.randn(2,512,64,64)]
+    feat_deep = [torch.randn(2,1024,32,32)]
+    feats = feat_shallow + feat_deep
+    
+    sources = mlfpn(feats)
+    
     
     

@@ -155,19 +155,20 @@ class MLFPN(nn.Module):
                  compress_ratio=16):
         super().__init__()
         self.phase = phase  # train or test
-        self.size = size    # 
-        self.planes = planes
-        self.smooth = smooth
-        self.num_levels = num_levels
-        self.num_scales = num_scales
-        self.side_channel = side_channel
+        self.size = size    # input img size (512)
+        self.planes = planes  # ultimate layers for all tums, default 256, have relation with input size
+        self.smooth = smooth  # convs 1x1 are smooth layers
+        self.num_levels = num_levels  # how many tums
+        self.num_scales = num_scales  # how many scale outputs for each tum
+        self.side_channel = side_channel  # use to add to tum input layers
+        self.sfam = sfam
         self.compress_ratio = compress_ratio
         
-        # build FFM
+        # build FFM: 
         # TODO: need parameter backbone type
         if backbone_type == 'SSDVGG':
-            shallow_in, shallow_out = 512, 256  # for vgg shallow layer output
-            deep_in, deep_out = 1024, 512       # for vgg deep layer output
+            shallow_in, shallow_out = 512, 256  
+            deep_in, deep_out = 1024, 512       
         self.reduce= BasicConv(
             shallow_in, shallow_out, kernel_size=3, stride=1, padding=1)
         self.up_reduce= BasicConv(
@@ -194,7 +195,7 @@ class MLFPN(nn.Module):
                             input_planes=self.planes//2,
                             is_smooth=self.smooth,
                             scales=self.num_scales,
-                            side_channel=self.side_channel))
+                            side_channel=self.planes))
         # build sfam:
         if self.sfam:
             self.sfam_module = SFAM(self.planes, 
@@ -226,19 +227,19 @@ class MLFPN(nn.Module):
         Args:
             x(list): feature list from vgg16, (512, 64, 64), (1024 , 32, 32)
         """
-        x_shallow = self.reduce(x)
-        x_deep = self.up_reduce(x)
-        base_feature = torch.cat(x_shallow, 
-            F.interpolate(x_deep, scale_factor=2, mode='nearest'), 1)
+        x_shallow = self.reduce(x[0])  # (b, 256,64,64)
+        x_deep = self.up_reduce(x[1])  # (b, 512,32,32)
+        base_feature = torch.cat([x_shallow, 
+            F.interpolate(x_deep, scale_factor=2, mode='nearest')], 1)  # (b,768,64,64)
         
         tum_outs = [self.tums[0](self.leach[0](base_feature), 'none')]
         for i in range(1, self.num_levels, 1):
             tum_outs.append(self.tums[i](self.leach[i](base_feature), tum_outs[i-1][-1]))
         
-        # concate same scale outputs together, [(2048,64,64),(2048,32,32),(2048,16,16),(2048,8,8),(2048,4,4),(2048,2,2)]
+        # concate same scale outputs together: tum_outs (8,) -> sources (6,)
         sources = []
         for i in range(self.num_scales, 0, -1):
-            sources.append(torch.cat([tum_out[i] for tum_out in tum_outs], 1))
+            sources.append(torch.cat([tum_out[i-1] for tum_out in tum_outs], 1))
         
         if self.sfam:
             sources = self.sfam_module(sources)
