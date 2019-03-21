@@ -17,8 +17,8 @@ from utils.anchor_generator import AnchorGenerator
 from utils.anchor_target import anchor_target
 from utils.multi_apply import multi_apply  
 from utils.bbox_reg import delta2bbox
-from .weight_init import kaiming_normal_init
-from .losses import weighted_smoothl1
+from model.weight_init import kaiming_normal_init
+from model.losses import weighted_smoothl1
 
 class M2detHead(nn.Module):
     """M2detHead主要完成3件事：生成anchors, 处理feat maps，计算loss
@@ -29,7 +29,8 @@ class M2detHead(nn.Module):
     """
     def __init__(self,
                  input_size = 512,      # 相同保留
-                 in_channels = [64, 32, 16, 8, 4, 2],
+                 planes = 256,           # 代表tums最终输出层数
+                 num_levels = 8,
                  num_classes = 81,
                  step_pattern = [8, 16, 32, 64, 128, 256],  # 代表特征图的缩放比例，也就是每个特征图上cell对应的原图大小，也就是原图所要布置anchor的尺寸空间(可以此计算ctx,cty)
                  size_pattern = [0.06, 0.15, 0.33, 0.51, 0.69, 0.87, 1.05],  # 代表anchors尺寸跟img的比例, 前6个数是min_size比例，后6个数是max_size比例，可以此计算anchor最小最大尺寸
@@ -38,21 +39,25 @@ class M2detHead(nn.Module):
                  target_means=(.0, .0, .0, .0),
                  target_stds=(1.0, 1.0, 1.0, 1.0),
                  **kwargs):  # 这里的2代表了2和1/2, 而3代表了3和1/3，可以此计算每个cell的anchor个数：2个方框+4个ratio=6个
+        super().__init__()
+        self.featmap_sizes = size_featmaps
+        self.target_means = target_means
+        self.target_stds = target_stds
         
         # create m2det head layers
         reg_convs = []
         cls_convs = []
-        for i in range(len(in_channels)):
+        for i in range(len(size_featmaps)):
             reg_convs.append(
                 nn.Conv2d(
-                    in_channels[i],
+                    planes * num_levels,
                     4 * 6,
                     kernel_size=3,
                     stride=1,
                     padding=1))
             cls_convs.append(
                 nn.Conv2d(
-                    in_channels[i],
+                    planes * num_levels,
                     num_classes * 6,
                     kernel_size=3,
                     stride=1,
@@ -65,12 +70,13 @@ class M2detHead(nn.Module):
             min_ratios = size_pattern[:-1]
             max_ratios = size_pattern[1:]
             
-            min_sizes = min_ratios * input_size
-            max_sizes = max_ratios * input_size
+            min_sizes = [min_ratios[i] * input_size for i in range(len(min_ratios))]
+            max_sizes = [max_ratios[i] * input_size for i in range(len(max_ratios))]
             
             anchor_ratios = anchor_ratio_range
             anchor_strides = step_pattern
-            
+        
+        self.anchor_generators = []
         for k in range(len(anchor_strides)):
             base_size = min_sizes[k]
             stride = anchor_strides[k]
@@ -78,13 +84,13 @@ class M2detHead(nn.Module):
             scales = [1., np.sqrt(max_sizes[k] / min_sizes[k])]  # 以base_size为第一个anchor，即scale=1，再以
             ratios = [1.]
             for r in anchor_ratios[k]:
-                ratios += [1 / r, r]  # m2det里边似乎选择了每个位置都是6个anchors
+                ratios += [1 / r, r]
             # scales (2,) and ratios (5,), if scale_major=False, (1,5)*(2,1)->(2,5)*(2,5)->(2,5)
             anchor_generator = AnchorGenerator(
                 base_size, scales, ratios, scale_major=False, ctr=ctr)
             
             # for m2det, there are 6 anchors for each cells, no matter in any featmap cell
-          
+            anchor_generator.base_anchors = anchor_generator.base_anchors[:6]  # 取前6个anchors(对应scale=1的5种ratios + scale=sqrt(max_size/min_size)的1种ratio)
 #            indices = list(range(len(ratios)))
 #            indices.insert(1, len(indices))
 #            anchor_generator.base_anchors = torch.index_select(
@@ -107,11 +113,12 @@ class M2detHead(nn.Module):
         self.reg_convs.apply(weights_init)
     
     def forward(self, feats):
-        """input from MLFPN
+        """return the output features of MLFPN
         Args:
-            feats(tensor): n levels tums outs concated samed scale out. 
-            [(2048,64,64),(2048,32,32),(2048,16,16),(2048,8,8),(2048,4,4),(2048,2,2)]
-        
+            feats(tensor): (6,)feats with (2,2048,64,64),(2,2048,32,32),(2,2048,16,16),(2,2048,8,8),(2,2048,4,4),(2,2048,2,2)
+        Returns:
+            bbox_preds(tensor): (6,)feats with (b,24,64,64),(b,24,32,32),(b,24,16,16),(b,24,8,8),(b,24,4,4),(b,24,2,2)
+            cls_scores(tensor): (6,)feats with (b,486,64,64),(b,486,32,32),(b,486,16,16),(b,486,8,8),(b,486,4,4),(b,486,2,2)
         """
         bbox_preds = []
         cls_scores = []
@@ -120,14 +127,134 @@ class M2detHead(nn.Module):
             cls_scores.append(cls_conv(feat))
         return bbox_preds, cls_scores
     
-    def get_anchors(self):
-        pass
+    def get_anchors(self, featmap_sizes, img_metas):
+        """Get anchors according to feature map sizes.
+        Args:
+            featmap_sizes (list[tuple]): Multi-level feature map sizes.
+            img_metas (list[dict]): Image meta info.
+
+        Returns:
+            tuple: anchors of each image, valid flags of each image
+        """
+        num_imgs = len(img_metas)
+        num_levels = len(featmap_sizes)
+
+        # since feature map sizes of all images are the same, we only compute
+        # anchors for one time
+        multi_level_anchors = []
+        for i in range(num_levels):
+            anchors = self.anchor_generators[i].grid_anchors(
+                featmap_sizes[i], self.anchor_strides[i])
+            multi_level_anchors.append(anchors)
+        anchor_list = [multi_level_anchors for _ in range(num_imgs)]
+
+        # for each image, we compute valid flags of multi level anchors
+        valid_flag_list = []
+        for img_id, img_meta in enumerate(img_metas):
+            multi_level_flags = []
+            for i in range(num_levels):
+                anchor_stride = self.anchor_strides[i]
+                feat_h, feat_w = featmap_sizes[i]
+                h, w, _ = img_meta['pad_shape']
+                valid_feat_h = min(int(np.ceil(h / anchor_stride)), feat_h)
+                valid_feat_w = min(int(np.ceil(w / anchor_stride)), feat_w)
+                flags = self.anchor_generators[i].valid_flags(
+                    (feat_h, feat_w), (valid_feat_h, valid_feat_w))
+                multi_level_flags.append(flags)
+            valid_flag_list.append(multi_level_flags)
+
+        return anchor_list, valid_flag_list
                 
-    def loss_single(self):
-        pass
+    def loss_single(self, cls_score, bbox_pred, labels, label_weights,
+                    bbox_targets, bbox_weights, num_total_samples, cfg):
+        """return one img loss
+        Args:
+            cls_score(tensor): (m, num_class) for all bbox in one img
+            bbox_pred(tensor): (m, 4) for all bbox coodinate in one img
+            labels(tensor): (m,)
+            label_weights(tensor): (m,)
+            bbox_targets(tensor): (m, 4)
+            bbox_weights(tensor): (m,)
+            num_total_samples
+            cfg
+        """
+        # loss of cls
+        loss_cls_all = F.cross_entropy(cls_score, labels, reduction='none')*label_weights
+        
+        # hard negtive mining
+        pos_inds = (labels > 0).nonzero().view(-1)
+        neg_inds = (labels == 0).nonzero().view(-1)
+        num_pos_samples = pos_inds.size(0)
+        num_neg_samples = cfg.neg_pos_ratio * num_pos_samples
+        if num_neg_samples > neg_inds.size(0):
+            num_neg_samples = neg_inds.size(0)
+        # only take 3*num_pos_samples topk as neg samples: topk means k max losses
+        topk_loss_cls_neg, _ = loss_cls_all[neg_inds].topk(num_neg_samples)  
+        loss_cls_pos = loss_cls_all[pos_inds].sum()
+        loss_cls_neg = topk_loss_cls_neg.sum()
+        loss_cls = (loss_cls_pos + loss_cls_neg) / num_total_samples
+        
+        # loss of reg
+        loss_reg = weighted_smoothl1(bbox_pred, bbox_targets, bbox_weights, 
+                                     beta=cfg.smoothl1_beta, 
+                                     avg_factor=num_total_samples)
+        return loss_cls, loss_reg
     
-    def loss(self):
-        pass        
+    def loss(self, cls_scores, bbox_preds, gt_bboxes, gt_labels, img_metas, cfg):
+        """ return losses dict('loss_cls', 'loss_reg')
+        Args:
+            cls_scores(list): (6,) with (b,n_class*6,h,w)
+            bbox_preds(list): (6,) with (b,n_cord*6,h,w)
+            gt_bboxes(list): (n_img,) with (m,4)
+            gt_labels(list): (n_img,) with (m,)
+            img_metas(list): (n_img,) with dict()
+            cfg
+        """
+        # get all anchors (n_img,): 
+        anchor_list, valid_flag_list = self.get_anchors(self.featmap_sizes, img_metas) # anchor_list(b,) with (24576,4),(6114,4),(1536,4),(384,4),(96,4),(24,4)
+        # get target (n_scale,): (2,k,4)
+        cls_reg_targets = anchor_target(
+            anchor_list,
+            valid_flag_list,
+            gt_bboxes,
+            img_metas,
+            self.target_means,
+            self.target_stds,
+            cfg,
+            gt_labels_list=gt_labels,
+            label_channels=1,
+            sampling=False,
+            unmap_outputs=False)
+        
+        if cls_reg_targets is None:
+            return None
+        (labels_list, label_weights_list, bbox_targets_list, 
+         bbox_weights_list, num_total_pos, num_total_neg) = cls_reg_targets
+        
+         # 由于anchor_target()函数多做了一步分解到level的操作，这里需要重新把
+        # 所有anchor合并到(b, sum(wi*hi*6), 4)
+        num_images = len(img_metas)
+        all_cls_scores = torch.cat([s.permute(0, 2, 3, 1).reshape(
+                num_images, -1, self.cls_out_channels) for s in cls_scores], 1)
+        all_labels = torch.cat(labels_list, -1).view(num_images, -1)
+        all_label_weights = torch.cat(label_weights_list, -1).view(num_images, -1)
+        all_bbox_preds = torch.cat([b.permute(0, 2, 3, 1).reshape(
+                num_images, -1, 4) for b in bbox_preds], -2)
+        all_bbox_targets = torch.cat(bbox_targets_list, -2).view(num_images, -1, 4)
+        all_bbox_weights = torch.cat(bbox_weights_list, -2).view(num_images, -1, 4)
+        
+        # calculate losses
+        # TODO: num_total_samples数据？？
+        losses_cls, losses_reg = multi_apply(self.loss_single,
+                                             all_cls_scores,
+                                             all_bbox_preds,
+                                             all_labels,
+                                             all_label_weights,
+                                             all_bbox_targets,
+                                             all_bbox_weights,
+                                             num_total_samples=num_total_pos,
+                                             cfg=cfg)
+        return dict(loss_cls=losses_cls, loss_reg=losses_reg)
 
 class SSDHead(nn.Module):
 
