@@ -144,8 +144,7 @@ class MLFPN(nn.Module):
     """
     def __init__(self, 
                  backbone_type,
-                 phase, 
-                 size, 
+                 input_size, 
                  planes, 
                  smooth=True, 
                  num_levels=8, 
@@ -154,8 +153,10 @@ class MLFPN(nn.Module):
                  sfam = False,
                  compress_ratio=16):
         super().__init__()
-        self.phase = phase  # train or test
-        self.size = size    # input img size (512)
+        # TODO: input_size似乎也没用，是否可去掉
+        # TODO: 去掉了phase参数，并在cfg中也去除，是否会影响？
+#        self.phase = phase  # train or test
+        self.input_size = input_size    # input img size (512)
         self.planes = planes  # ultimate layers for all tums, default 256, have relation with input size
         self.smooth = smooth  # convs 1x1 are smooth layers
         self.num_levels = num_levels  # how many tums
@@ -165,10 +166,13 @@ class MLFPN(nn.Module):
         self.compress_ratio = compress_ratio
         
         # build FFM: 
-        # TODO: need parameter backbone type
-        if backbone_type == 'SSDVGG':
+        if backbone_type == 'M2detVGG':
             shallow_in, shallow_out = 512, 256  
-            deep_in, deep_out = 1024, 512       
+            deep_in, deep_out = 1024, 512
+        elif backbone_type == 'M2detResnet':
+            shallow_in, shallow_out = 512, 256  
+            deep_in, deep_out = 1024, 512
+            
         self.reduce= BasicConv(
             shallow_in, shallow_out, kernel_size=3, stride=1, padding=1)
         self.up_reduce= BasicConv(
@@ -180,22 +184,24 @@ class MLFPN(nn.Module):
                       kernel_size=(1,1),stride=(1,1))]*self.num_levels)
         
         # build TUM
-        self.tums = []
+        tums = []
         for i in range(self.num_levels):
             if i == 0:
-                self.tums.append(
+                tums.append(
                         TUM(first_level=True, 
                             input_planes=self.planes//2,
                             is_smooth=self.smooth,
                             scales=self.num_scales,
                             side_channel=512))
             else:
-                self.tums.append(
+                tums.append(
                         TUM(first_level=False,
                             input_planes=self.planes//2,
                             is_smooth=self.smooth,
                             scales=self.num_scales,
                             side_channel=self.planes))
+        self.tums = nn.ModuleList(tums)
+        
         # build sfam:
         if self.sfam:
             self.sfam_module = SFAM(self.planes, 

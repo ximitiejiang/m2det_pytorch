@@ -26,7 +26,7 @@ class OneStageDetector(nn.Module):
         super(OneStageDetector, self).__init__()
         self.backbone = SSDVGG(**cfg.model.backbone)        
         self.bbox_head = SSDHead(**cfg.model.bbox_head)    
-        
+
         self.train_cfg = cfg.train_cfg
         self.test_cfg = cfg.test_cfg
         self.init_weights(pretrained=pretrained)
@@ -41,6 +41,8 @@ class OneStageDetector(nn.Module):
 
     def extract_feat(self, img):
         x = self.backbone(img)
+        if self.cfg.model.neck is not None:
+            x = self.neck(x)
         return x
 
     def forward_train(self, img, img_metas, gt_bboxes, gt_labels):

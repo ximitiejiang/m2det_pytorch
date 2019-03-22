@@ -1,10 +1,10 @@
 # model settings
 input_size = 512
 model = dict(
-    type='SingleStageDetector',
+    type='M2detDetector',
     pretrained='weights/m2det/vgg16_reducedfc.pth',
     backbone=dict(
-        type='SSDVGG',
+        type='M2detVGG',
         input_size=input_size,
         depth=16,
         with_last_pool=False,
@@ -12,19 +12,29 @@ model = dict(
         out_indices=(3, 4),
         out_feature_indices=(22, 34),
         l2_norm_scale=20),
-    neck=dict(type='MLFPN',
-        input_size=input_size
-        )
+    neck=dict(
+        type='MLFPN',
+        backbone_type='M2detVGG',
+        input_size=input_size,
+        planes=256,       # 代表每个tum的输出layers
+        smooth=True,      # 代表tum是否包含smooth conv(1x1)
+        num_levels=8,     # 代表多少个tums
+        num_scales=6,     # 代表每个tum输出多少scales
+        side_channel=512,
+        sfam=False,     # 是否含sfam模块
+        compress_ratio=16),
     bbox_head=dict(
         type='M2detHead',
         input_size=input_size,
-        in_channels=(512, 1024, 512, 256, 256, 256),
+        planes = 256,
+        num_levels=8,
         num_classes=81,
         anchor_strides=(8, 16, 32, 64, 100, 300),
-        basesize_ratio_range=(0.15, 0.9),
-        anchor_ratios=([2], [2, 3], [2, 3], [2, 3], [2], [2]),
+        size_pattern = [0.06, 0.15, 0.33, 0.51, 0.69, 0.87, 1.05],  # 代表anchors尺寸跟img的比例, 前6个数是min_size比例，后6个数是max_size比例，可以此计算anchor最小最大尺寸
+        size_featmaps = [(64,64), (32,32), (16,16), (8,8), (4,4), (2,2)],
+        anchor_ratio_range = ([2, 3], [2, 3], [2, 3], [2, 3], [2, 3], [2, 3]),
         target_means=(.0, .0, .0, .0),
-        target_stds=(0.1, 0.1, 0.2, 0.2)))
+        target_stds=(1.0, 1.0, 1.0, 1.0)))
 cudnn_benchmark = True
 train_cfg = dict(
     assigner=dict(
@@ -48,6 +58,7 @@ test_cfg = dict(
 # dataset settings
 dataset_type = 'CocoDataset'
 data_root = './data/coco/'
+# 预训练模型是否跟该mean/std不匹配？？？当前预训练模型是ssd的pytorch版本，是否应该换成caffe版本？这样mean/std不用换
 img_norm_cfg = dict(mean=[123.675, 116.28, 103.53], std=[1, 1, 1], to_rgb=True)
 data = dict(
     imgs_per_gpu=2,  # 从4改成2
@@ -59,7 +70,7 @@ data = dict(
             type=dataset_type,
             ann_file=data_root + 'annotations/instances_train2017.json',
             img_prefix=data_root + 'train2017/',
-            img_scale=(300, 300),
+            img_scale=(512, 512),
             img_norm_cfg=img_norm_cfg,
             size_divisor=None,
             flip_ratio=0.5,
@@ -84,7 +95,7 @@ data = dict(
         type=dataset_type,
         ann_file=data_root + 'annotations/instances_val2017.json',
         img_prefix=data_root + 'val2017/',
-        img_scale=(300, 300),
+        img_scale=(512, 512),
         img_norm_cfg=img_norm_cfg,
         size_divisor=None,
         flip_ratio=0,
@@ -96,7 +107,7 @@ data = dict(
         type=dataset_type,
         ann_file=data_root + 'annotations/instances_val2017.json',
         img_prefix=data_root + 'val2017/',
-        img_scale=(300, 300),
+        img_scale=(512, 512),
         img_norm_cfg=img_norm_cfg,
         size_divisor=None,
         flip_ratio=0,
@@ -124,7 +135,7 @@ log_config = dict(
     ])
 # yapf:enable
 # runtime settings
-gpus=2
+gpus=1
 total_epochs = 24
 dist_params = dict(backend='nccl')
 log_level = 'INFO'

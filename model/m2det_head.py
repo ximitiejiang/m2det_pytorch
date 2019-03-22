@@ -32,15 +32,17 @@ class M2detHead(nn.Module):
                  planes = 256,           # 代表tums最终输出层数
                  num_levels = 8,
                  num_classes = 81,
-                 step_pattern = [8, 16, 32, 64, 128, 256],  # 代表特征图的缩放比例，也就是每个特征图上cell对应的原图大小，也就是原图所要布置anchor的尺寸空间(可以此计算ctx,cty)
+                 anchor_strides = [8, 16, 32, 64, 128, 256],  # 代表特征图的缩放比例，也就是每个特征图上cell对应的原图大小，也就是原图所要布置anchor的尺寸空间(可以此计算ctx,cty)
                  size_pattern = [0.06, 0.15, 0.33, 0.51, 0.69, 0.87, 1.05],  # 代表anchors尺寸跟img的比例, 前6个数是min_size比例，后6个数是max_size比例，可以此计算anchor最小最大尺寸
-                 size_featmaps = [64, 32, 16, 8, 4, 2],
+                 size_featmaps = [(64,64), (32,32), (16,16), (8,8), (4,4), (2,2)],
                  anchor_ratio_range = ([2, 3], [2, 3], [2, 3], [2, 3], [2, 3], [2, 3]),
                  target_means=(.0, .0, .0, .0),
                  target_stds=(1.0, 1.0, 1.0, 1.0),
                  **kwargs):  # 这里的2代表了2和1/2, 而3代表了3和1/3，可以此计算每个cell的anchor个数：2个方框+4个ratio=6个
         super().__init__()
         self.featmap_sizes = size_featmaps
+        self.anchor_strides = anchor_strides
+        self.anchor_ratios = anchor_ratio_range
         self.target_means = target_means
         self.target_stds = target_stds
         
@@ -73,17 +75,17 @@ class M2detHead(nn.Module):
             min_sizes = [min_ratios[i] * input_size for i in range(len(min_ratios))]
             max_sizes = [max_ratios[i] * input_size for i in range(len(max_ratios))]
             
-            anchor_ratios = anchor_ratio_range
-            anchor_strides = step_pattern
+            
+            
         
         self.anchor_generators = []
-        for k in range(len(anchor_strides)):
+        for k in range(len(self.anchor_strides)):
             base_size = min_sizes[k]
-            stride = anchor_strides[k]
+            stride = self.anchor_strides[k]
             ctr = ((stride - 1) / 2., (stride - 1) / 2.)
             scales = [1., np.sqrt(max_sizes[k] / min_sizes[k])]  # 以base_size为第一个anchor，即scale=1，再以
             ratios = [1.]
-            for r in anchor_ratios[k]:
+            for r in self.anchor_ratios[k]:
                 ratios += [1 / r, r]
             # scales (2,) and ratios (5,), if scale_major=False, (1,5)*(2,1)->(2,5)*(2,5)->(2,5)
             anchor_generator = AnchorGenerator(
@@ -256,6 +258,80 @@ class M2detHead(nn.Module):
                                              cfg=cfg)
         return dict(loss_cls=losses_cls, loss_reg=losses_reg)
 
+    def get_bboxes(self, cls_scores, bbox_preds, img_metas, cfg, rescale=False):
+        """用于在test时计算bbox"""
+        assert len(cls_scores) == len(bbox_preds)
+        num_levels = len(cls_scores)
+
+        mlvl_anchors = [
+            self.anchor_generators[i].grid_anchors(cls_scores[i].size()[-2:],
+                                                   self.anchor_strides[i])
+            for i in range(num_levels)
+        ]
+        result_list = []
+        for img_id in range(len(img_metas)):
+            cls_score_list = [
+                cls_scores[i][img_id].detach() for i in range(num_levels)
+            ]
+            bbox_pred_list = [
+                bbox_preds[i][img_id].detach() for i in range(num_levels)
+            ]
+            img_shape = img_metas[img_id]['img_shape']
+            scale_factor = img_metas[img_id]['scale_factor']
+            proposals = self.get_bboxes_single(cls_score_list, bbox_pred_list,
+                                               mlvl_anchors, img_shape,
+                                               scale_factor, cfg, rescale)
+            result_list.append(proposals)
+        return result_list
+
+    def get_bboxes_single(self,
+                          cls_scores,
+                          bbox_preds,
+                          mlvl_anchors,
+                          img_shape,
+                          scale_factor,
+                          cfg,
+                          rescale=False):
+        assert len(cls_scores) == len(bbox_preds) == len(mlvl_anchors)
+        mlvl_bboxes = []
+        mlvl_scores = []
+        for cls_score, bbox_pred, anchors in zip(cls_scores, bbox_preds,
+                                                 mlvl_anchors):
+            assert cls_score.size()[-2:] == bbox_pred.size()[-2:]
+            cls_score = cls_score.permute(1, 2, 0).reshape(
+                -1, self.cls_out_channels)
+            if self.use_sigmoid_cls:
+                scores = cls_score.sigmoid()
+            else:
+                scores = cls_score.softmax(-1)
+            bbox_pred = bbox_pred.permute(1, 2, 0).reshape(-1, 4)
+            nms_pre = cfg.get('nms_pre', -1)
+            if nms_pre > 0 and scores.shape[0] > nms_pre:
+                if self.use_sigmoid_cls:
+                    max_scores, _ = scores.max(dim=1)
+                else:
+                    max_scores, _ = scores[:, 1:].max(dim=1)
+                _, topk_inds = max_scores.topk(nms_pre)
+                anchors = anchors[topk_inds, :]
+                bbox_pred = bbox_pred[topk_inds, :]
+                scores = scores[topk_inds, :]
+            bboxes = delta2bbox(anchors, bbox_pred, self.target_means,
+                                self.target_stds, img_shape)
+            mlvl_bboxes.append(bboxes)
+            mlvl_scores.append(scores)
+        mlvl_bboxes = torch.cat(mlvl_bboxes)
+        if rescale:
+            mlvl_bboxes /= mlvl_bboxes.new_tensor(scale_factor)
+        mlvl_scores = torch.cat(mlvl_scores)
+        if self.use_sigmoid_cls:
+            padding = mlvl_scores.new_zeros(mlvl_scores.shape[0], 1)
+            mlvl_scores = torch.cat([padding, mlvl_scores], dim=1)
+        det_bboxes, det_labels = multiclass_nms(
+            mlvl_bboxes, mlvl_scores, cfg.score_thr, cfg.nms, cfg.max_per_img)
+        return det_bboxes, det_labels
+
+
+# %%
 class SSDHead(nn.Module):
 
     def __init__(self,
