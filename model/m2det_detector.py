@@ -10,7 +10,10 @@ from .one_stage_detector import OneStageDetector
 from .m2detvgg import M2detVGG
 from .m2det_head import M2detHead
 from .mlfpn import MLFPN
+from utils.registry_build import registered
 
+
+@registered.register_module
 class M2detDetector(OneStageDetector):
 
     def __init__(self, cfg, pretrained=None):  # 输入参数修改成cfg，同时预训练模型参数网址可用了

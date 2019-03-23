@@ -19,7 +19,10 @@ from utils.multi_apply import multi_apply
 from utils.bbox_reg import delta2bbox
 from model.weight_init import kaiming_normal_init
 from model.losses import weighted_smoothl1
+from utils.registry_build import registered
 
+
+@registered.register_module
 class M2detHead(nn.Module):
     """M2detHead主要完成3件事：生成anchors, 处理feat maps，计算loss
     1. anchors的生成：输入anchor跟原图的尺寸比例

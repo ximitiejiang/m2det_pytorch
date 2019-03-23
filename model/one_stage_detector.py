@@ -15,7 +15,9 @@ from .ssdvgg import SSDVGG
 from .ssd_head import SSDHead
 from dataset.utils import tensor2imgs
 from dataset.class_names import get_classes
+from utils.registry_build import registered
 
+@registered.register_module
 class OneStageDetector(nn.Module):
     """one stage单级检测器: 整合了base/singlestagedetector在一起
     1. 采用ssd head作为bbox head来使用： bbox head的本质应该是输出最终结果。

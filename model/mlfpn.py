@@ -11,6 +11,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .weight_init import kaiming_normal_init
+from utils.registry_build import registered
+
 
 class BasicConv(nn.Module):
 
@@ -137,7 +139,7 @@ class SFAM(nn.Module):
         return attention_feat
 
 
-
+@registered.register_module
 class MLFPN(nn.Module):
     """创建Multi Layers Feature Pyramid Net
     1. TUM: 类似与unet/fpn的多级特征融合模块
