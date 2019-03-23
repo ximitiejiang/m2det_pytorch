@@ -11,6 +11,7 @@ from .m2detvgg import M2detVGG
 from .m2det_head import M2detHead
 from .mlfpn import MLFPN
 from utils.registry_build import registered
+from utils.registry_build import build_module
 
 
 @registered.register_module
@@ -19,10 +20,12 @@ class M2detDetector(OneStageDetector):
     def __init__(self, cfg, pretrained=None):  # 输入参数修改成cfg，同时预训练模型参数网址可用了
         super(OneStageDetector, self).__init__()
         self.cfg = cfg
-        self.backbone = M2detVGG(**cfg.model.backbone)        
-        self.bbox_head = M2detHead(**cfg.model.bbox_head)    
+#        self.backbone = M2detVGG(**cfg.model.backbone)        
+#        self.bbox_head = M2detHead(**cfg.model.bbox_head)    
+        self.backbone = build_module(cfg.model.backbone, registered)
+        self.bbox_head = build_module(cfg.model.bbox_head, registered)
         if cfg.model.neck is not None:
-            self.neck = MLFPN(**cfg.model.neck)
+            self.neck = build_module(cfg.model.neck,registered)
         self.train_cfg = cfg.train_cfg
         self.test_cfg = cfg.test_cfg
         self.init_weights(pretrained=pretrained)

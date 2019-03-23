@@ -15,7 +15,7 @@ from .ssdvgg import SSDVGG
 from .ssd_head import SSDHead
 from dataset.utils import tensor2imgs
 from dataset.class_names import get_classes
-from utils.registry_build import registered
+from utils.registry_build import registered, build_module
 
 @registered.register_module
 class OneStageDetector(nn.Module):
@@ -24,14 +24,20 @@ class OneStageDetector(nn.Module):
     虽然ssd head继承自anchor head但他并没有用来生成rois，所以作为bbox head使用。
     2. 
     """
-    def __init__(self, cfg, pretrained=None):  # 输入参数修改成cfg，同时预训练模型参数网址可用了
+    def __init__(self, cfg):  # 输入参数修改成cfg，同时预训练模型参数网址可用了
         super(OneStageDetector, self).__init__()
-        self.backbone = SSDVGG(**cfg.model.backbone)        
-        self.bbox_head = SSDHead(**cfg.model.bbox_head)    
+#        self.backbone = SSDVGG(**cfg.model.backbone)        
+#        self.bbox_head = SSDHead(**cfg.model.bbox_head)
+        
+        self.cfg = cfg
+        self.backbone = build_module(cfg.model.backbone, registered)
+        self.bbox_head = build_module(cfg.model.bbox_head, registered)
+        if cfg.model.neck is not None:
+            self.neck = build_module(cfg.model.neck,registered)
 
         self.train_cfg = cfg.train_cfg
         self.test_cfg = cfg.test_cfg
-        self.init_weights(pretrained=pretrained)
+        self.init_weights(pretrained=cfg.model.pretrained)
 
     def init_weights(self, pretrained=None):
         if pretrained is not None:
