@@ -79,7 +79,7 @@ class M2detVGG(VGG):
 #            if isinstance(m, nn.Conv2d):
 #                xavier_init(m, distribution='uniform')
 
-        constant_init(self.l2_norm, self.l2_norm.scale)
+        constant_init(self.l2_norm, self.l2_norm.scale)  # l2 norm参数没有预训练值，需要单独初始化
 
     def forward(self, x):
         outs = []

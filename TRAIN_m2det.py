@@ -19,10 +19,9 @@ from mmcv.runner import Runner
 from dataset.sampler import GroupSampler  # 用于dataloader采样定义
 from utils.config import Config
 from model.m2det_detector import M2detDetector
+#from model.one_stage_detector import OneStageDetector
 from dataset.coco_dataset import CocoDataset
 from dataset.utils import get_dataset
-from utils.registry_build import build_module
-from utils.registry_build import registered
 
 def get_dist_info():
     if dist._initialized:
@@ -97,9 +96,8 @@ def train(cfg_path, dataset_class):
     logger.info('Distributed training: {}'.format(distributed))
     logger.info('DataParallel training: {}'.format(parallel))
     # build model & detector
-#    model = M2detDetector(cfg, pretrained=cfg.model.pretrained)   # 注意：要增加pretrained的路径定义
-#    model = OneStageDetector(cfg)
-    model = build_module(cfg, registered)
+#    model = M2detDetector(cfg)
+    model = M2detDetector(cfg)
     if not parallel:
         model = model.cuda()
     else:

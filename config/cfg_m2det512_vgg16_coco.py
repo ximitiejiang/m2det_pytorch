@@ -2,7 +2,8 @@
 input_size = 512
 model = dict(
     type='M2detDetector',
-    pretrained='weights/m2det/vgg16_reducedfc.pth',
+#    pretrained='weights/m2det/vgg16_reducedfc.pth', # 这里不能采用原有M2det的预训练模型，原因是1.原有预训练模型是pytorch模型，跟mean/std不一样；2.原有预训练参数跟当前使用的VGG模型层的命名不一致，不带'feature'，导致初始化实际上没有用
+    pretrained='weights/m2det/vgg16_caffe-292e1171.pth',
     backbone=dict(
         type='M2detVGG',
         input_size=input_size,
@@ -135,8 +136,8 @@ log_config = dict(
     ])
 # yapf:enable
 # runtime settings
-gpus=1
-total_epochs = 24
+gpus=2
+total_epochs = 10
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
 work_dir = './work_dirs/ssd300_coco'

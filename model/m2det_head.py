@@ -46,6 +46,7 @@ class M2detHead(nn.Module):
         self.featmap_sizes = size_featmaps
         self.anchor_strides = anchor_strides
         self.anchor_ratios = anchor_ratio_range
+        self.num_classes = num_classes
         self.target_means = target_means
         self.target_stds = target_stds
         
@@ -130,7 +131,7 @@ class M2detHead(nn.Module):
         for (feat, reg_conv, cls_conv) in zip(feats, self.reg_convs, self.cls_convs):
             bbox_preds.append(reg_conv(feat))
             cls_scores.append(cls_conv(feat))
-        return bbox_preds, cls_scores
+        return cls_scores, bbox_preds
     
     def get_anchors(self, featmap_sizes, img_metas):
         """Get anchors according to feature map sizes.
@@ -240,7 +241,7 @@ class M2detHead(nn.Module):
         # 所有anchor合并到(b, sum(wi*hi*6), 4)
         num_images = len(img_metas)
         all_cls_scores = torch.cat([s.permute(0, 2, 3, 1).reshape(
-                num_images, -1, self.cls_out_channels) for s in cls_scores], 1)
+                num_images, -1, self.num_classes) for s in cls_scores], 1)
         all_labels = torch.cat(labels_list, -1).view(num_images, -1)
         all_label_weights = torch.cat(label_weights_list, -1).view(num_images, -1)
         all_bbox_preds = torch.cat([b.permute(0, 2, 3, 1).reshape(

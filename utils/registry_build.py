@@ -22,7 +22,10 @@ class Registry():
         return self._module_dict
         
     def register_module(self, cls):
-        """用于作为装饰器接收类，把类加入module dict，最终装饰器也返回该类"""
+        """用于作为装饰器接收类，把类加入module dict，最终装饰器也返回该类
+        该注册操作在第一个类初始化时就会作为装饰器优先运行，从而完成所有类的搜集注册
+        在detection任务中，就会在主程序的detector创建并初始化时调用到这个函数，一步完成所有类的注册
+        """
         if not issubclass(cls, nn.Module):
             raise TypeError(
                 'module must be a child of nn.Module, but got {}'.format(type(cls)))
@@ -38,13 +41,21 @@ registered = Registry()  # 实例化注册器
 
 
 def build_module(cfg, registered):
-    args = cfg.copy()
-    obj_type = args.pop('type')   # 提取type进行判断，同时从args中去除type字符串
+    """return a specific module from config&class
+    Args:
+        cfg(Dict): module config Dict with 'type' in it
+        registered(object): object from Registery class with all the Module class in module_dict
+    Return:
+        object module(object)
+    """
+#    args = copy.deepcopy(cfg)   # 用字典方法.copy()之后args跟cfg似乎还是不太一样：cfg(Dict)，而args是cfg=Dict
+    obj_type = cfg.pop('type')   # 提取type进行判断，同时从args中去除type字符串
     if obj_type not in registered.module_dict:
         raise KeyError('{} is not in the registered dict'.format(obj_type))
     else:
         obj_type = registered.module_dict[obj_type]  # 获得字符串类名对应的类
-    return obj_type(**args)  # 实例化类
+    return obj_type(**cfg)  # 实例化类
+
 
 @registered.register_module
 class TestClass(nn.Module):

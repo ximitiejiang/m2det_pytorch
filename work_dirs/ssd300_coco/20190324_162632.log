@@ -1,0 +1,10 @@
+2019-03-24 16:26:32,137 - INFO - Start running, host: ubuntu@ubun, work_dir: /home/ubuntu/suliang_git/m2det_pytorch/work_dirs/ssd300_coco
+2019-03-24 16:26:32,178 - INFO - workflow: [('train', 1)], max: 24 epochs
+2019-03-24 16:33:49,010 - INFO - Start running, host: ubuntu@ubun, work_dir: /home/ubuntu/suliang_git/m2det_pytorch/work_dirs/ssd300_coco
+2019-03-24 16:33:49,011 - INFO - workflow: [('train', 1)], max: 24 epochs
+2019-03-24 16:34:07,863 - INFO - Epoch [1][50/293165]	lr: 0.00016, eta: 30 days, 16:29:33, time: 0.377, data_time: 0.017, loss_cls: 21.1917, loss_reg: 0.2553, loss: 21.4470
+2019-03-24 16:34:21,281 - INFO - Epoch [1][100/293165]	lr: 0.00019, eta: 26 days, 6:29:32, time: 0.268, data_time: 0.003, loss_cls: 23.7399, loss_reg: 0.1892, loss: 23.9291
+2019-03-24 16:34:34,762 - INFO - Epoch [1][150/293165]	lr: 0.00021, eta: 24 days, 19:57:34, time: 0.270, data_time: 0.003, loss_cls: 25.4764, loss_reg: 0.1816, loss: 25.6581
+2019-03-24 16:34:48,287 - INFO - Epoch [1][200/293165]	lr: 0.00024, eta: 24 days, 3:07:46, time: 0.270, data_time: 0.003, loss_cls: 25.1079, loss_reg: 0.1671, loss: 25.2750
+2019-03-24 16:35:01,808 - INFO - Epoch [1][250/293165]	lr: 0.00027, eta: 23 days, 16:59:32, time: 0.270, data_time: 0.003, loss_cls: 25.5909, loss_reg: 0.1624, loss: 25.7533
+2019-03-24 16:35:15,343 - INFO - Epoch [1][300/293165]	lr: 0.00029, eta: 23 days, 10:19:44, time: 0.271, data_time: 0.003, loss_cls: 26.2054, loss_reg: 0.1752, loss: 26.3806

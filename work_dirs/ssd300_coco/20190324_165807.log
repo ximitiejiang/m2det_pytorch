@@ -1,0 +1,5 @@
+2019-03-24 16:58:07,187 - INFO - Start running, host: ubuntu@ubun, work_dir: /home/ubuntu/suliang_git/m2det_pytorch/work_dirs/ssd300_coco
+2019-03-24 16:58:07,187 - INFO - workflow: [('train', 1)], max: 10 epochs
+2019-03-24 16:58:45,827 - INFO - Epoch [1][50/146583]	lr: 0.00016, eta: 13 days, 2:15:26, time: 0.772, data_time: 0.024, loss_cls: 20.3078, loss_reg: 0.2646, loss: 20.5724
+2019-03-24 16:59:13,073 - INFO - Epoch [1][100/146583]	lr: 0.00019, eta: 11 days, 4:03:06, time: 0.545, data_time: 0.005, loss_cls: 22.4287, loss_reg: 0.2813, loss: 22.7100
+2019-03-24 16:59:38,571 - INFO - Epoch [1][150/146583]	lr: 0.00021, eta: 10 days, 7:54:02, time: 0.510, data_time: 0.004, loss_cls: 21.9149, loss_reg: 0.3130, loss: 22.2279
