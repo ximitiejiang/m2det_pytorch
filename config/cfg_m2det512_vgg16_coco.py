@@ -140,7 +140,7 @@ gpus=2
 total_epochs = 10
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
-work_dir = './work_dirs/ssd300_coco'
+work_dir = './work_dirs/m2det512_coco'
 load_from = None
 resume_from = None
 workflow = [('train', 1)]
