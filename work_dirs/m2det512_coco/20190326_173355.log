@@ -1,0 +1,7 @@
+2019-03-26 17:33:55,396 - INFO - Start running, host: ubuntu@ubun, work_dir: /home/ubuntu/suliang_git/m2det_pytorch/work_dirs/m2det512_coco
+2019-03-26 17:33:55,426 - INFO - workflow: [('train', 1)], max: 10 epochs
+2019-03-26 17:34:34,951 - INFO - Epoch [1][50/146583]	lr: 0.00016, eta: 13 days, 9:46:20, time: 0.790, data_time: 0.026, loss_cls: 20.3804, loss_reg: 0.2829, loss: 20.6633
+2019-03-26 17:38:47,228 - INFO - Start running, host: ubuntu@ubun, work_dir: /home/ubuntu/suliang_git/m2det_pytorch/work_dirs/m2det512_coco
+2019-03-26 17:38:47,229 - INFO - workflow: [('train', 1)], max: 10 epochs
+2019-03-26 17:40:44,422 - INFO - Start running, host: ubuntu@ubun, work_dir: /home/ubuntu/suliang_git/mmdetection/ex6_retinanet_r50_fpn_1x/work_dirs/retinanet_r50_fpn_1x
+2019-03-26 17:40:44,423 - INFO - workflow: [('train', 1)], max: 12 epochs
